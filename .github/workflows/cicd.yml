@@ -1,0 +1,70 @@
+name: CI/CD                      # must be exactly "CI/CD" (the deploy server checks it)
+
+on:
+  push:
+    branches: [main]             # pushes to main only
+
+jobs:
+  test-build-push:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Get the code
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      # 2. Start the full stack (db + backend + frontend) on port 5173
+      - name: Start the app with Docker Compose
+        run: docker compose up -d --build
+
+      - name: Wait until the app is ready
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:5173/api/health; then echo " -> ready"; exit 0; fi
+            echo "waiting..."; sleep 2
+          done
+          docker compose logs
+          exit 1
+
+      # 3. Run the Playwright tests against it
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install the Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests
+        run: npx playwright test
+
+      - name: Upload the test report (only if tests failed)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+
+      # 4. Build and push the images (only reached if the tests passed)
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build the images
+        run: |
+          docker build -t ${{ vars.DOCKERHUB_USERNAME }}/auth-app:frontend -f Dockerfile.multistage .
+          docker build -t ${{ vars.DOCKERHUB_USERNAME }}/auth-app:backend ./backend
+
+      - name: Push the images
+        run: |
+          docker push ${{ vars.DOCKERHUB_USERNAME }}/auth-app:frontend
+          docker push ${{ vars.DOCKERHUB_USERNAME }}/auth-app:backend
+
+      - name: Stop the app
+        if: always()
+        run: docker compose down -v
