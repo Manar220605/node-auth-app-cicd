@@ -60,7 +60,7 @@ function renderWelcome() {
     <h1></h1>
     <p>You are logged in. Deployed automatically by CI/CD V2</p>
     <button type="button">Log out</button>`;
-  app.querySelector("h1").textContent = `Hello, ${currentUser}!`;
+  app.querySelector("h1").textContent = `Welcome, ${currentUser}!`;
   app.querySelector("button").addEventListener("click", () => {
     currentUser = null;
     go("/login");
